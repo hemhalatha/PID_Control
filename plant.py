@@ -1,175 +1,138 @@
+"""Physical plant models and sampled closed-loop simulation."""
+
 import numpy as np
+
+from pid_controller import PIDController
 
 
 class MassSpringDamper:
-    """Simulate a mass attached to a spring and damper."""
+    """Linear plant with state [position, velocity]."""
 
     def __init__(self, mass=1.0, damping=10.0, spring=20.0):
-        if mass <= 0:
-            raise ValueError("Mass must be positive.")
-
-        if damping < 0 or spring < 0:
-            raise ValueError(
-                "Damping and spring stiffness cannot be negative."
-            )
-
-        self.mass = mass
-        self.damping = damping
-        self.spring = spring
-
-        self.reset()
+        if mass <= 0 or damping < 0 or spring < 0:
+            raise ValueError("Invalid mass, damping or spring stiffness.")
+        self.mass = float(mass)
+        self.damping = float(damping)
+        self.spring = float(spring)
+        self.state = np.zeros(2)
 
     def reset(self, position=0.0, velocity=0.0):
-        """Reset the initial position and velocity."""
+        self.state = np.array([position, velocity], dtype=float)
 
-        self.position = position
-        self.velocity = velocity
+    @property
+    def position(self):
+        return self.state[0]
 
-    def acceleration(self, position, velocity, force):
-        """Calculate acceleration using the equation of motion."""
+    @property
+    def velocity(self):
+        return self.state[1]
 
-        return (
-            force
-            - self.damping * velocity
-            - self.spring * position
-        ) / self.mass
-
-    def _derivatives(self, state, force):
-        """Return the derivatives of position and velocity."""
-
-        position, velocity = state
-
-        acceleration = self.acceleration(
-            position, velocity, force
-        )
-
-        return np.array([velocity, acceleration])
+    def derivatives(self, state, force):
+        x, v = state
+        return np.array([
+            v, (force - self.damping * v - self.spring * x) / self.mass
+        ])
 
     def step(self, force, dt):
-        """Advance the plant by one time step using RK4."""
-
-        if dt <= 0:
-            raise ValueError("Time step must be positive.")
-
-        state = np.array([self.position, self.velocity])
-
-        k1 = self._derivatives(state, force)
-
-        k2 = self._derivatives(
-            state + 0.5 * dt * k1, force
-        )
-
-        k3 = self._derivatives(
-            state + 0.5 * dt * k2, force
-        )
-
-        k4 = self._derivatives(
-            state + dt * k3, force
-        )
-
-        state = state + (dt / 6.0) * (
-            k1 + 2 * k2 + 2 * k3 + k4
-        )
-
-        self.position, self.velocity = state
-
+        self.state = rk4(self.derivatives, self.state, force, dt)
         return self.position, self.velocity
 
 
-def simulate(
-    controller,
-    plant,
-    duration=10.0,
-    setpoint=1.0,
-    plant_dt=0.001,
-    noise_amplitude=0.0,
-    seed=42,
-    initial_position=0.0,
-    initial_velocity=0.0,
-):
-    """Run a closed-loop simulation and return recorded data."""
+class ThirdOrderPlant:
+    """Three first-order lags in series: G(s) = 1/(s+1)^3."""
 
-    if duration <= 0 or plant_dt <= 0:
-        raise ValueError("Duration and time step must be positive.")
+    def __init__(self):
+        self.state = np.zeros(3)
 
-    if noise_amplitude < 0:
-        raise ValueError("Noise amplitude cannot be negative.")
+    def reset(self, position=0.0, velocity=0.0):
+        self.state = np.array([position + velocity, position + velocity, position],
+                              dtype=float)
 
-    controller_dt = controller.dt
+    @property
+    def position(self):
+        return self.state[2]
 
-    # Ensure controller updates align with plant integration steps.
-    update_interval = round(controller_dt / plant_dt)
+    @property
+    def velocity(self):
+        return self.state[1] - self.state[2]
 
-    if update_interval < 1 or not np.isclose(
-        update_interval * plant_dt, controller_dt
-    ):
-        raise ValueError(
-            "Controller time step must be a positive multiple "
-            "of the plant time step."
-        )
+    @staticmethod
+    def derivatives(state, control):
+        a, b, c = state
+        return np.array([-a + control, -b + a, -c + b])
 
-    steps = round(duration / plant_dt)
+    def step(self, force, dt):
+        self.state = rk4(self.derivatives, self.state, force, dt)
+        return self.position, self.velocity
 
-    if not np.isclose(steps * plant_dt, duration):
-        raise ValueError(
-            "Duration must be a multiple of the plant time step."
-        )
 
-    time = np.arange(steps + 1) * plant_dt
+def rk4(derivatives, state, control, dt):
+    """Advance a state by one fourth-order Runge-Kutta step."""
+    k1 = derivatives(state, control)
+    k2 = derivatives(state + dt * k1 / 2, control)
+    k3 = derivatives(state + dt * k2 / 2, control)
+    k4 = derivatives(state + dt * k3, control)
+    return state + dt * (k1 + 2 * k2 + 2 * k3 + k4) / 6
 
-    # Reset the controller and plant before every experiment.
+
+def simulate(controller, plant, duration=8.0, setpoint=1.0, plant_dt=0.002,
+             noise_amplitude=0.0, seed=10, initial_position=0.0,
+             initial_velocity=0.0):
+    """Record at controller updates; integrate the plant with finer RK4 steps.
+
+    A callable setpoint is evaluated at each controller update. The final
+    recorded time is the nearest whole controller interval to duration.
+    """
+    if duration <= 0 or plant_dt <= 0 or noise_amplitude < 0:
+        raise ValueError("Invalid simulation duration, step or noise amplitude.")
+    dt = controller.dt
+    count = int(round(duration / dt)) + 1
+    if count < 2:
+        raise ValueError("Duration must include at least two samples.")
+    times = np.arange(count) * dt
+    steps = max(1, int(np.ceil(dt / plant_dt)))
+    h = dt / steps
+    rng = np.random.default_rng(seed)
     controller.reset()
     plant.reset(initial_position, initial_velocity)
 
-    # Fixed seed makes noisy experiments reproducible.
-    rng = np.random.default_rng(seed)
+    keys = ("position", "velocity", "force", "setpoint", "p_term", "i_term",
+            "d_term", "measurement", "error")
+    results = {key: np.zeros(count) for key in keys}
+    results["time"] = times
 
-    results = {
-        "time": time,
-        "setpoint": np.zeros(steps + 1),
-        "position": np.zeros(steps + 1),
-        "velocity": np.zeros(steps + 1),
-        "measurement": np.zeros(steps + 1),
-        "error": np.zeros(steps + 1),
-        "force": np.zeros(steps + 1),
-        "p_term": np.zeros(steps + 1),
-        "i_term": np.zeros(steps + 1),
-        "d_term": np.zeros(steps + 1),
-    }
-
-    force = 0.0
-    measurement = initial_position
-
-    for i, t in enumerate(time):
-
-        # Setpoint can be a constant or a function of time.
+    for j, t in enumerate(times):
         target = setpoint(t) if callable(setpoint) else setpoint
+        value = plant.position
+        measurement = value + rng.uniform(-noise_amplitude, noise_amplitude)
+        force = controller.update(target, measurement)
 
-        # Update the controller only at its sampling interval.
-        if i % update_interval == 0:
+        results["position"][j] = value
+        results["velocity"][j] = plant.velocity
+        results["force"][j] = force
+        results["setpoint"][j] = target
+        results["p_term"][j] = controller.p_term
+        results["i_term"][j] = controller.i_term
+        results["d_term"][j] = controller.d_term
+        results["measurement"][j] = measurement
+        results["error"][j] = target - value
 
-            noise = rng.uniform(
-                -noise_amplitude, noise_amplitude
-            )
-
-            measurement = plant.position + noise
-
-            force = controller.update(target, measurement)
-
-        # Record the current state before advancing the plant.
-        results["setpoint"][i] = target
-        results["position"][i] = plant.position
-        results["velocity"][i] = plant.velocity
-        results["measurement"][i] = measurement
-        results["error"][i] = target - plant.position
-        results["force"][i] = force
-
-        results["p_term"][i] = controller.p_term
-        results["i_term"][i] = controller.i_term
-        results["d_term"][i] = controller.d_term
-
-        # Hold the latest controller force between updates.
-        if i < steps:
-            plant.step(force, plant_dt)
-
+        if j == count - 1:
+            break
+        for _ in range(steps):
+            plant.step(force, h)
     return results
+
+
+def run_response(kp, ki=0.0, kd=0.0, duration=8.0, dt=0.01,
+                 plant=None, output_limit=None, anti_windup=False,
+                 derivative_on_measurement=True, filter_tau=0.0, noise=0.0,
+                 seed=10, target=1.0, plant_dt=0.002):
+    """Convenience wrapper for experiments with the original report settings."""
+    limits = (None, None) if output_limit is None else (-output_limit, output_limit)
+    controller = PIDController(kp, ki, kd, dt, limits, anti_windup,
+                               derivative_on_measurement, filter_tau)
+    if plant is None:
+        plant = MassSpringDamper()
+    return simulate(controller, plant, duration=duration, setpoint=target,
+                    plant_dt=plant_dt, noise_amplitude=noise, seed=seed)

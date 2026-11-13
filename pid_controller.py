@@ -1,150 +1,75 @@
+"""Discrete parallel PID controller with optional practical safeguards."""
+
 
 class PIDController:
-    """Discrete PID controller with optional practical improvements."""
+    """Return the actuator command and retain the individual PID terms."""
 
-    def __init__(
-        self,
-        kp=0.0,
-        ki=0.0,
-        kd=0.0,
-        dt=0.01,
-        output_limits=(None, None),
-        anti_windup=False,
-        derivative_on_measurement=False,
-        derivative_filter_tau=0.0,
-    ):
+    def __init__(self, kp=0.0, ki=0.0, kd=0.0, dt=0.01,
+                 output_limits=(None, None), anti_windup=False,
+                 derivative_on_measurement=True, derivative_filter_tau=0.0):
         if dt <= 0:
-            raise ValueError("Sampling time must be positive.")
-
+            raise ValueError("Sampling interval must be positive.")
         if derivative_filter_tau < 0:
             raise ValueError("Filter time constant cannot be negative.")
-
         lower, upper = output_limits
+        if lower is not None and upper is not None and lower >= upper:
+            raise ValueError("Lower output limit must be below upper limit.")
 
-        if lower is not None and upper is not None:
-            if lower >= upper:
-                raise ValueError("Lower limit must be less than upper limit.")
-
-        self.kp = kp
-        self.ki = ki
-        self.kd = kd
-        self.dt = dt
-
+        self.kp = float(kp)
+        self.ki = float(ki)
+        self.kd = float(kd)
+        self.dt = float(dt)
         self.output_limits = output_limits
         self.anti_windup = anti_windup
         self.derivative_on_measurement = derivative_on_measurement
-        self.derivative_filter_tau = derivative_filter_tau
-
+        self.derivative_filter_tau = float(derivative_filter_tau)
         self.reset()
 
     def reset(self):
-        """Reset the controller before starting a new simulation."""
-
+        """Clear all stored controller state."""
+        self.integral = 0.0  # Integral contribution, in output units.
         self.previous_error = None
         self.previous_measurement = None
-
-        self.integral = 0.0
         self.filtered_derivative = 0.0
-
         self.p_term = 0.0
         self.i_term = 0.0
         self.d_term = 0.0
 
-    def _clamp(self, value):
-        """Restrict a value to the actuator output limits."""
-
-        lower, upper = self.output_limits
-
-        if lower is not None:
-            value = max(lower, value)
-
-        if upper is not None:
-            value = min(upper, value)
-
-        return value
-
     def update(self, setpoint, measurement):
-        """Calculate the control output for one time step."""
-
+        """Calculate one PID update; the caller holds the returned output."""
         error = setpoint - measurement
-
-        # Proportional term
         self.p_term = self.kp * error
 
-        # Derivative term
         if self.previous_error is None:
             derivative = 0.0
-
         elif self.derivative_on_measurement:
-            derivative = -(
-                measurement - self.previous_measurement
-            ) / self.dt
-
+            derivative = -(measurement - self.previous_measurement) / self.dt
         else:
-            derivative = (
-                error - self.previous_error
-            ) / self.dt
+            derivative = (error - self.previous_error) / self.dt
 
-        # Optional low-pass filter for the derivative
-        tau = self.derivative_filter_tau
-
-        if tau > 0:
-            alpha = tau / (tau + self.dt)
-
-            self.filtered_derivative = (
-                alpha * self.filtered_derivative
-                + (1 - alpha) * derivative
-            )
-        else:
-            self.filtered_derivative = derivative
-
+        alpha = self.dt / (self.derivative_filter_tau + self.dt)
+        self.filtered_derivative += alpha * (derivative - self.filtered_derivative)
         self.d_term = self.kd * self.filtered_derivative
 
-        # Calculate a candidate integral value
-        integral_change = error * self.dt
-        new_integral = self.integral + integral_change
+        integral_change = self.ki * error * self.dt
+        candidate = self.integral + integral_change
+        requested = self.p_term + candidate + self.d_term
+        lower, upper = self.output_limits
 
-        # Calculate output using the candidate integral
-        tentative_output = (
-            self.p_term
-            + self.ki * new_integral
-            + self.d_term
+        worsening = (
+            (upper is not None and requested > upper and integral_change > 0)
+            or (lower is not None and requested < lower and integral_change < 0)
         )
+        if not (self.anti_windup and worsening):
+            self.integral = candidate
 
-        # Conditional integration to prevent integral windup
-        if self.anti_windup:
-            lower, upper = self.output_limits
-
-            above_limit = (
-                upper is not None and tentative_output > upper
-            )
-
-            below_limit = (
-                lower is not None and tentative_output < lower
-            )
-
-            integral_output_change = self.ki * integral_change
-
-            if above_limit and integral_output_change > 0:
-                pass
-
-            elif below_limit and integral_output_change < 0:
-                pass
-
-            else:
-                self.integral = new_integral
-
-        else:
-            self.integral = new_integral
-
-        self.i_term = self.ki * self.integral
-
-        # Combine the three terms and apply actuator limits
+        self.i_term = self.integral
         output = self.p_term + self.i_term + self.d_term
-        output = self._clamp(output)
+        if lower is not None:
+            output = max(lower, output)
+        if upper is not None:
+            output = min(upper, output)
 
-        # Store values for the next time step
         self.previous_error = error
         self.previous_measurement = measurement
-
         return output

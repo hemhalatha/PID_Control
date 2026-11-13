@@ -1,0 +1,5 @@
+Controller,Kp_N_per_m,Ki_N_per_m_s,Kd_N_s_per_m,Rise_10_90_s,Overshoot_percent,Settling_2pct_s,Steady_state_error_m
+P,100,0,0,0.1777,1.7350,N/A,0.1667
+PI,100,120,0,0.1538,15.9042,1.5000,0.0000
+PD,100,0,18,N/A,0.0000,N/A,0.1667
+PID,100,100,15,0.4043,1.7275,0.6500,-0.0000

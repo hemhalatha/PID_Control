@@ -1,202 +1,35 @@
+"""Section 4: annotate the four step response measures."""
 
-from pathlib import Path
+import numpy as np
 
-import matplotlib.pyplot as plt
-
-from pid_controller import PIDController
-from plant import MassSpringDamper, simulate
-from metrics import calculate_metrics, print_metrics
+from experiments.common import base, save, target, trace
+from metrics import print_metrics, response_metrics
+from plant import run_response
 
 
 def main():
-    # Configure the plant and PID controller
-    plant = MassSpringDamper(
-        mass=1.0,
-        damping=10.0,
-        spring=20.0,
-    )
-
-    controller = PIDController(
-        kp=100,
-        ki=250,
-        kd=2,
-        dt=0.01,
-    )
-
-    target = 1.0
-    duration = 10.0
-
-    # Run the simulation
-    results = simulate(
-        controller,
-        plant,
-        duration=duration,
-        setpoint=target,
-        plant_dt=0.001,
-    )
-
-    time = results["time"]
-    position = results["position"]
-
-    # Calculate performance metrics
-    metrics = calculate_metrics(time, position, target)
-
-    print_metrics("PID Step Response", metrics)
-
-    t10 = metrics["t10"]
-    t90 = metrics["t90"]
-    rise_time = metrics["rise_time"]
-
-    peak_time = metrics["peak_time"]
-    peak_position = metrics["peak_position"]
-
-    overshoot = metrics["overshoot"]
-    settling_time = metrics["settling_time"]
-    steady_state_error = metrics["steady_state_error"]
-
-    # Create the figure
-    fig, ax = plt.subplots(figsize=(12, 6))
-
-    ax.plot(
-        time,
-        position,
-        color="royalblue",
-        linewidth=2,
-        label="PID response",
-    )
-
-    # Target position
-    ax.axhline(
-        target,
-        color="black",
-        linestyle="--",
-        linewidth=1.5,
-        label="Setpoint (1 m)",
-    )
-
-    # Settling tolerance band
-    ax.axhspan(
-        0.98,
-        1.02,
-        color="green",
-        alpha=0.12,
-        label="±2% settling band",
-    )
-
-    # 1. Rise time
-    if rise_time is not None:
-        ax.scatter(
-            [t10, t90],
-            [0.1, 0.9],
-            color="darkorange",
-            zorder=5,
-        )
-
-        ax.vlines(
-            [t10, t90],
-            ymin=0,
-            ymax=[0.1, 0.9],
-            color="darkorange",
-            linestyle=":",
-        )
-
-        ax.annotate(
-            f"Rise time = {rise_time:.3f} s",
-            xy=(t90, 0.9),
-            xytext=(1.5, 0.45),
-            arrowprops=dict(
-                arrowstyle="->",
-                color="darkorange",
-            ),
-            color="darkorange",
-            fontsize=10,
-        )
-
-    # 2. Overshoot
-    if overshoot > 0:
-        ax.scatter(
-            peak_time,
-            peak_position,
-            color="red",
-            zorder=5,
-        )
-
-        ax.annotate(
-            f"Overshoot = {overshoot:.2f}%",
-            xy=(peak_time, peak_position),
-            xytext=(1.5, peak_position + 0.12),
-            arrowprops=dict(
-                arrowstyle="->",
-                color="red",
-            ),
-            color="red",
-            fontsize=10,
-        )
-
-    # 3. Settling time
-    if settling_time is not None:
-        ax.axvline(
-            settling_time,
-            color="green",
-            linestyle="--",
-            linewidth=1.5,
-            label=f"Settling time = {settling_time:.3f} s",
-        )
-
-    # 4. Steady-state error
-    ax.scatter(
-        time[-1],
-        position[-1],
-        color="purple",
-        zorder=5,
-    )
-
-    ax.annotate(
-        f"Steady-state error = {steady_state_error:.6f} m",
-        xy=(time[-1], position[-1]),
-        xytext=(5.0, 0.75),
-        arrowprops=dict(
-            arrowstyle="->",
-            color="purple",
-        ),
-        color="purple",
-        fontsize=10,
-    )
-
-    # Graph formatting
-    ax.set_title(
-        "PID Step Response - Performance Measures",
-        fontsize=14,
-        fontweight="bold",
-    )
-
-    ax.set_xlabel("Time (s)")
-    ax.set_ylabel("Position (m)")
-
-    ax.set_xlim(0, duration + 0.2)
-    ax.set_ylim(0, max(1.4, peak_position + 0.25))
-
-    ax.grid(True, alpha=0.3)
-    ax.legend(loc="lower right")
-
-    fig.tight_layout()
-
-    # Save the graph in the project graphs directory
-    project_dir = Path(__file__).resolve().parents[1]
-    graph_dir = project_dir / "graphs"
-    graph_dir.mkdir(exist_ok=True)
-
-    output_path = graph_dir / "01_step_response.png"
-
-    fig.savefig(
-        output_path,
-        dpi=300,
-        bbox_inches="tight",
-    )
-
-    print(f"\nGraph saved to: {output_path}")
-
-    plt.show()
+    run = run_response(100, 120, 20, duration=6)
+    met = response_metrics(run)
+    fig, ax = base("4. Four step-response measures (PID: 100, 120, 20)")
+    trace(ax, run, "Position")
+    target(ax, 6)
+    ax.plot(met["peak_time"], met["peak_position"], "o",
+            label=f"Peak / overshoot = {met['overshoot']:.2f}%")
+    ax.axhspan(0.98, 1.02, alpha=0.10, label="±2% settling band")
+    if np.isfinite(met["settling_time"]):
+        ax.axvline(met["settling_time"], linestyle=":",
+                   label=f"Settling time = {met['settling_time']:.2f} s")
+    if np.isfinite(met["rise_time"]):
+        ax.plot([met["t10"], met["t90"]], [0.1, 0.9], "s",
+                label=f"10–90% rise = {met['rise_time']:.2f} s")
+    error = met["steady_state_error"]
+    error_text = f"{error:.3f}" if abs(error) >= 0.0005 else "0.000"
+    ax.annotate(f"Final error ≈ {error_text} m",
+                xy=(run["time"][-1], run["position"][-1]),
+                xytext=(3.7, 0.65), arrowprops=dict(arrowstyle="->"))
+    ax.legend(fontsize=8, loc="lower right")
+    print_metrics("PID step response", met)
+    save(fig, "04_metrics.png", "Rise, overshoot, settling and final error annotated.")
 
 
 if __name__ == "__main__":

@@ -1,170 +1,36 @@
+"""Section 6: compare four controllers and export the report table."""
 
-from pathlib import Path
+import csv
 
-import matplotlib.pyplot as plt
+from experiments.common import ROOT, base, save, target, trace
+from metrics import format_number, print_metrics, response_metrics
+from plant import run_response
 
-from pid_controller import PIDController
-from plant import MassSpringDamper, simulate
-from metrics import calculate_metrics
+CASES = {"P": (100, 0, 0), "PI": (100, 120, 0),
+         "PD": (100, 0, 18), "PID": (100, 100, 15)}
 
 
 def main():
-    # Plant and simulation parameters
-    plant = MassSpringDamper(
-        mass=1.0,
-        damping=10.0,
-        spring=20.0,
-    )
+    fig, ax = base("6. P, PI, PD and PID on the same spring system")
+    rows = []
+    for label, gains in CASES.items():
+        run = run_response(*gains, duration=8)
+        trace(ax, run, f"{label}: {gains}")
+        met = response_metrics(run)
+        print_metrics(label, met)
+        rows.append([label, *gains, *[format_number(met[key]) for key in (
+            "rise_time", "overshoot", "settling_time", "steady_state_error")]])
+    target(ax, 8)
+    ax.legend(fontsize=8)
+    save(fig, "06_comparison.png", "Matched plant and initial conditions.")
 
-    target = 1.0
-    duration = 15.0
-    dt = 0.01
-
-    # Controller configurations: (Kp, Ki, Kd)
-    configurations = {
-        "P": (50, 0, 0),
-        "PI": (50, 100, 0),
-        "PD": (50, 0, 5),
-        "PID": (50, 100, 5),
-        "Tuned PID": (120, 250, 5),
-    }
-
-    fig, ax = plt.subplots(figsize=(12, 6))
-
-    # Print comparison table
-    print("\nController Performance Comparison")
-    print("-" * 108)
-
-    print(
-        f"{'Controller':<14}"
-        f"{'Kp':>6}"
-        f"{'Ki':>6}"
-        f"{'Kd':>6}"
-        f"{'Rise (s)':>14}"
-        f"{'Overshoot (%)':>17}"
-        f"{'Settling (s)':>16}"
-        f"{'Error (m)':>15}"
-    )
-
-    print("-" * 108)
-
-    for name, gains in configurations.items():
-        kp, ki, kd = gains
-
-        # Initialize controller
-        controller = PIDController(
-            kp=kp,
-            ki=ki,
-            kd=kd,
-            dt=dt,
-            derivative_on_measurement=True,
-        )
-
-        # Run simulation
-        results = simulate(
-            controller,
-            plant,
-            duration=duration,
-            setpoint=target,
-            plant_dt=0.001,
-        )
-
-        time = results["time"]
-        position = results["position"]
-
-        # Calculate performance metrics
-        metrics = calculate_metrics(
-            time, position, target
-        )
-
-        rise_time = metrics["rise_time"]
-        settling_time = metrics["settling_time"]
-
-        rise_text = (
-            f"{rise_time:.3f}"
-            if rise_time is not None
-            else "N/A"
-        )
-
-        settling_text = (
-            f"{settling_time:.3f}"
-            if settling_time is not None
-            else "N/A"
-        )
-
-        print(
-            f"{name:<14}"
-            f"{kp:>6}"
-            f"{ki:>6}"
-            f"{kd:>6}"
-            f"{rise_text:>14}"
-            f"{metrics['overshoot']:>17.2f}"
-            f"{settling_text:>16}"
-            f"{metrics['steady_state_error']:>15.6f}"
-        )
-
-        # Plot controller response
-        ax.plot(
-            time,
-            position,
-            linewidth=2,
-            label=f"{name} ({kp}, {ki}, {kd})",
-        )
-
-    print("-" * 108)
-
-    # Target position
-    ax.axhline(
-        target,
-        color="black",
-        linestyle="--",
-        linewidth=1.5,
-        label="Setpoint (1 m)",
-    )
-
-    # Settling tolerance band
-    ax.axhspan(
-        0.98,
-        1.02,
-        color="green",
-        alpha=0.12,
-        label="±2% settling band",
-    )
-
-    # Graph formatting
-    ax.set_title(
-        "Comparison of P, PI, PD and PID Controllers",
-        fontsize=14,
-        fontweight="bold",
-    )
-
-    ax.set_xlabel("Time (s)")
-    ax.set_ylabel("Position (m)")
-
-    ax.set_xlim(0, 5)
-    ax.set_ylim(0, 1.3)
-
-    ax.grid(True, alpha=0.3)
-    ax.legend(loc="lower right", fontsize=9)
-
-    fig.tight_layout()
-
-    # Save the graph
-    project_dir = Path(__file__).resolve().parents[1]
-    graph_dir = project_dir / "graphs"
-    graph_dir.mkdir(exist_ok=True)
-
-    output_path = graph_dir / "05_comparison.png"
-
-    fig.savefig(
-        output_path,
-        dpi=300,
-        bbox_inches="tight",
-    )
-
-    print(f"\nGraph saved to: {output_path}")
-
-    plt.show()
+    with (ROOT / "results.csv").open("w", newline="", encoding="utf-8") as file:
+        writer = csv.writer(file)
+        writer.writerow(["Controller", "Kp_N_per_m", "Ki_N_per_m_s", "Kd_N_s_per_m",
+                         "Rise_10_90_s", "Overshoot_percent", "Settling_2pct_s",
+                         "Steady_state_error_m"])
+        writer.writerows(rows)
+    print("Comparison table saved to results.csv")
 
 
 if __name__ == "__main__":
