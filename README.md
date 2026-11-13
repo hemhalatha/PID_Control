@@ -1,676 +1,183 @@
+# PID Control — Simulation and Analysis
 
-# PID Control: Simulation and Analysis
+A Python project that demonstrates how PID controllers move a physical system toward a desired position and keep it there. It uses a mass–spring–damper model to explain proportional, integral and derivative control through numerical simulations and graphs.
 
-A Python-based study of Proportional-Integral-Derivative (PID)
-control using numerical simulation, mathematical analysis, and
-experimental comparison.
+The controller is implemented from scratch using **Python, NumPy and Matplotlib**, without any control-system libraries.
 
-This project demonstrates the fundamentals of PID control,
-controller tuning, performance evaluation, and practical control
-system challenges using a mass-spring-damper system.
+![Comparison of P, PI, PD and PID controllers](graphs/06_comparison.png)
 
-The PID controller and numerical integration methods are
-implemented from scratch using Python and NumPy, without
-ready-made control system libraries.
+*Figure: Comparison of four controllers tracking a 1 m position target.*
 
-## Objectives
+## What is PID control?
 
-- Understand proportional, integral, and derivative control.
-- Compare P, PI, PD, and PID controllers.
-- Evaluate controller performance using step response metrics.
-- Investigate actuator saturation and integral windup.
-- Analyze sensor noise and derivative filtering.
-- Demonstrate derivative kick prevention.
-- Study the effects of controller sampling time.
-- Apply and improve Ziegler-Nichols PID tuning.
+A PID controller continuously compares the desired value (setpoint) with the measured value and calculates a correction based on three terms:
 
-## Project Structure
+| Term | Role |
+|---|---|
+| **P — Proportional** | Reacts to the current error. |
+| **I — Integral** | Accumulates past error to remove persistent tracking error. |
+| **D — Derivative** | Reacts to the rate of change to help reduce oscillations. |
 
-```text
-pid-control/
-├── pid_controller.py
-├── plant.py
-├── metrics.py
-├── run_experiments.py
-├── requirements.txt
-├── README.md
-├── experiments/
-│   ├── __init__.py
-│   ├── exp01_step_response.py
-│   ├── exp02_proportional.py
-│   ├── exp03_integral.py
-│   ├── exp04_derivative.py
-│   ├── exp05_comparison.py
-│   ├── exp06_windup.py
-│   ├── exp07_sensor_noise.py
-│   ├── exp08_derivative_kick.py
-│   ├── exp09_sampling_time.py
-│   ├── exp10_ziegler_nichols.py
-│   └── exp11_improved_tuning.py
-└── graphs/
-```
+The control law is:
 
-## Requirements
+$$
+u(t) = K_p e(t) + K_i \int_0^t e(\tau)\,d\tau + K_d \frac{de(t)}{dt}
+$$
 
-- Python 3.10 or later
-- NumPy
-- Matplotlib
+where $e(t)=r(t)-x(t)$, $r$ is the target, and $x$ is the measured position. In the practical implementation, the derivative is calculated from the measurement by default to avoid derivative kick.
 
-No additional control system libraries are required.
+## Quick start
 
-## Installation
+**Requirements:** Python 3.11–3.14, NumPy and Matplotlib.
 
-Clone the repository and navigate to the project directory.
+Clone or download this repository and open a terminal in the project directory.
 
-```bash
-git clone <repository-url>
-cd pid-control
-```
-
-Create a virtual environment.
-
-```bash
-python -m venv .venv
-```
-
-Activate the virtual environment.
-
-**Windows PowerShell**
+### Windows (PowerShell)
 
 ```powershell
-.\.venv\Scripts\Activate.ps1
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe run_experiments.py
 ```
 
-**Linux / macOS**
+### Linux / macOS
 
 ```bash
-source .venv/bin/activate
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python run_experiments.py
 ```
 
-Install the dependencies.
+Running the experiment runner generates all **11 figures** in `graphs/` and saves the controller comparison to `results.csv`. No interactive plot windows are required.
 
-```bash
-python -m pip install -r requirements.txt
+To run one experiment instead, use the virtual environment's Python interpreter:
+
+```powershell
+.\.venv\Scripts\python.exe -m experiments.exp06_windup
 ```
 
-## Running the Experiments
+On Linux/macOS, use `.venv/bin/python` in place of `.\.venv\Scripts\python.exe`.
 
-### Run All Experiments
+## Simulation model
 
-Execute the following command from the project root:
-
-```bash
-python run_experiments.py
-```
-
-This command runs all 11 experiments, prints their numerical
-results, and saves the generated figures in the `graphs/`
-directory.
-
-The runner uses a non-interactive Matplotlib backend, so the
-experiments execute without opening individual plot windows.
-
-### Run Individual Experiments
-
-Each experiment can also be executed independently.
-
-```bash
-python -m experiments.exp01_step_response
-```
-
-For example, to investigate integral windup:
-
-```bash
-python -m experiments.exp06_windup
-```
-
-When executed individually, an experiment saves its figure and
-displays it using Matplotlib.
-
-## System Model
-
-### Mass-Spring-Damper System
-
-The primary plant is a block attached to a linear spring
-and a viscous damper.
-
-The equation of motion is:
+The primary system is a 1 kg block attached to a spring and a damper. The goal is to move it from rest to a position of 1 m.
 
 $$
-m\ddot{x} + b\dot{x} + kx = F
+m\ddot{x}+b\dot{x}+kx=F
 $$
-
-Rearranging for acceleration:
-
-$$
-\ddot{x} = \frac{F-b\dot{x}-kx}{m}
-$$
-
-The plant parameters are:
-
-| Parameter | Symbol | Value |
-|-----------|--------|-------|
-| Mass | m | 1 kg |
-| Damping coefficient | b | 10 N·s/m |
-| Spring stiffness | k | 20 N/m |
-| Target position | r | 1 m |
-| Initial position | x(0) | 0 m |
-| Initial velocity | v(0) | 0 m/s |
-
-The corresponding transfer function is:
-
-$$
-G(s)=\frac{X(s)}{F(s)}
-=\frac{1}{s^2+10s+20}
-$$
-
-At the target position, the block requires a constant holding
-force to balance the spring force:
-
-$$
-F=kx=20(1)=20\text{ N}
-$$
-
-This explains why proportional control alone cannot eliminate
-steady-state error in this system.
-
-## PID Controller
-
-The continuous-time PID control equation is:
-
-$$
-u(t)=K_pe(t)+K_i\int_0^t e(\tau)d\tau
-+K_d\frac{de(t)}{dt}
-$$
-
-where:
-
-$$
-e(t)=r(t)-x(t)
-$$
-
-The controller consists of three terms:
-
-| Term | Function |
-|------|----------|
-| Proportional | Responds to the current error |
-| Integral | Accumulates past error |
-| Derivative | Responds to the rate of change of error |
-
-The controller uses a discrete-time implementation:
-
-$$
-e_k=r_k-x_k
-$$
-
-$$
-P_k=K_pe_k
-$$
-
-$$
-I_k=I_{k-1}+K_ie_k\Delta t
-$$
-
-$$
-D_k=K_d\frac{e_k-e_{k-1}}{\Delta t}
-$$
-
-$$
-u_k=P_k+I_k+D_k
-$$
-
-The reusable controller in `pid_controller.py` also supports:
-
-- Configurable output limits.
-- Conditional integration for anti-windup.
-- Derivative on measurement.
-- First-order derivative filtering.
-- Configurable sampling intervals.
-- Independent access to P, I, and D contributions.
-- Controller state reset.
-
-## Numerical Simulation
-
-The mass-spring-damper plant is represented by two
-first-order differential equations:
-
-$$
-\dot{x}=v
-$$
-
-$$
-\dot{v}=\frac{F-bv-kx}{m}
-$$
-
-The equations are integrated using the fourth-order
-Runge-Kutta (RK4) method.
-
-The default simulation intervals for the primary plant are:
 
 | Parameter | Value |
-|-----------|-------|
-| Controller sampling interval | 0.01 s |
-| Plant integration interval | 0.001 s |
+|---|---|
+| Mass ($m$) | 1 kg |
+| Damping ($b$) | 10 N·s/m |
+| Spring stiffness ($k$) | 20 N/m |
+| Target position | 1 m |
+| Initial position and velocity | 0 m, 0 m/s |
 
-The controller output is held constant between consecutive
-updates using a zero-order hold.
+The spring requires a constant holding force of 20 N at the target. Proportional control alone therefore leaves a nonzero steady-state error; integral action supplies the holding force needed for accurate tracking.
 
-Separating the controller and plant time steps allows sampling
-effects to be studied independently of numerical integration
-errors.
+The physical model is integrated using fourth-order Runge–Kutta (RK4), with substeps no larger than 0.002 s. The controller normally updates every 0.01 s, holding its output constant between updates.
 
-Sensor noise experiments use a fixed random seed of 42 to
-ensure reproducible results.
-
-## Performance Metrics
-
-The `metrics.py` module calculates the following measures:
-
-| Metric | Definition |
-|--------|------------|
-| Rise time | Time between reaching 10% and 90% of the commanded step |
-| Overshoot | Maximum percentage exceeded beyond the target |
-| Settling time | Time after which the response remains within ±2% of the commanded step |
-| Steady-state error | Difference between the target and final recorded output |
-
-Rise time and settling time are measured relative to the
-commanded target, rather than the final achieved position.
-
-If a controller does not reach the required threshold,
-the corresponding metric is reported as N/A.
-
-Steady-state error is estimated from the final simulation
-sample. This estimate should only be interpreted as a true
-steady-state error when the response has converged.
+A second system, $G(s)=1/(s+1)^3$, is used to study Ziegler–Nichols tuning.
 
 ## Experiments
 
-### 1. Step Response and Performance Metrics
+Each experiment is a separate Python module and generates one standalone figure. Click a figure link to view the result.
 
-Demonstrates the four performance metrics on a single
-annotated PID step response.
+| Experiment | What it demonstrates | Figure |
+|---|---|---|
+| [01 — Step response](experiments/exp01_step_response.py) | Rise time, overshoot, settling time and steady-state error | [View](graphs/04_metrics.png) |
+| [02 — Proportional](experiments/exp02_proportional.py) | Four P gains and theoretical equilibrium error | [View](graphs/05a_p_only.png) |
+| [03 — Integral](experiments/exp03_integral.py) | Elimination of persistent error | [View](graphs/05b_integral.png) |
+| [04 — Derivative](experiments/exp04_derivative.py) | Reduction of overshoot through damping | [View](graphs/05c_derivative.png) |
+| [05 — Comparison](experiments/exp05_comparison.py) | P, PI, PD and PID performance | [View](graphs/06_comparison.png) |
+| [06 — Windup](experiments/exp06_windup.py) | ±30 N saturation and anti-windup | [View](graphs/07a_windup.png) |
+| [07 — Sensor noise](experiments/exp07_sensor_noise.py) | ±1 mm noise and derivative filtering | [View](graphs/07b_noise.png) |
+| [08 — Derivative kick](experiments/exp08_derivative_kick.py) | Setpoint-induced force spikes and prevention | [View](graphs/07c_kick.png) |
+| [09 — Sampling time](experiments/exp09_sampling_time.py) | Effect of slow controller updates | [View](graphs/07d_sampling.png) |
+| [10 — Ultimate gain](experiments/exp10_ziegler_nichols.py) | Sustained oscillations and ultimate period | [View](graphs/08a_ultimate_gain.png) |
+| [11 — PID tuning](experiments/exp11_improved_tuning.py) | Ziegler–Nichols tuning and manual improvement | [View](graphs/08b_zn_tuning.png) |
 
-```bash
-python -m experiments.exp01_step_response
+## Key results
+
+### Controller comparison
+
+| Controller | Kp | Ki | Kd | Rise (s) | Overshoot | Settling (s) | Error (m) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| P | 100 | 0 | 0 | 0.1777 | 1.74% | N/A | 0.1667 |
+| PI | 100 | 120 | 0 | 0.1538 | 15.90% | 1.50 | ≈ 0 |
+| PD | 100 | 0 | 18 | N/A | 0% | N/A | 0.1667 |
+| **PID** | **100** | **100** | **15** | **0.4043** | **1.73%** | **0.65** | **≈ 0** |
+
+The selected PID gains are **Kp = 100, Ki = 100 and Kd = 15**. They achieve low overshoot, fast settling and negligible tracking error in the ideal spring-system simulation. See [results.csv](results.csv) for the numerical comparison.
+
+Rise time measures the 10–90% target crossing, settling time uses a ±2% target band, and steady-state error is estimated from the final 5% of recorded samples. N/A indicates that the required threshold or settling condition was not achieved during the simulation. The ideal comparison uses no actuator limit.
+
+### Practical control challenges
+
+| Problem | Solution | Simulation result |
+|---|---|---|
+| Integral windup | Conditional integration | Overshoot: 25.44% → 7.71% |
+| Sensor noise | Low-pass derivative filter | Derivative-force fluctuations reduced by 88.08% (standard deviation) |
+| Derivative kick | Derivative on measurement | Setpoint-induced spike: 1500 N → 0 N |
+| Slow updates | Faster controller sampling | Overshoot: 13.17% at 0.15 s → 1.73% at 0.01 s |
+
+For the third-order system, the sampled ultimate gain is 7.8822 and the measured oscillation period is 3.652 s. Manual tuning reduces overshoot from 52.19% to 21.05% and settling time from 9.91 s to 5.03 s relative to the sampled Ziegler–Nichols PID.
+
+[View tuning comparison](graphs/08b_zn_tuning.png).
+
+## Project structure
+
+```text
+pid-control/
+├── pid_controller.py    # PID calculations and practical safeguards
+├── plant.py             # Plant models, RK4 and simulation
+├── metrics.py           # Step-response performance measures
+├── experiments/        # 11 independent experiments and shared plotting
+├── graphs/             # Generated figures
+├── tests/              # Numerical and controller tests
+├── run_experiments.py   # Run all experiments
+├── results.csv          # Controller comparison data
+└── requirements.txt    # Pinned dependencies
 ```
 
-![Step Response](graphs/01_step_response.png)
+## Try your own controller
 
-### 2. Proportional Control
-
-Compares proportional gains of 10, 50, 100, and 300.
-
-The theoretical steady-state position is:
-
-$$
-x_{ss}=\frac{K_p}{K_p+k}r
-$$
-
-The steady-state error is:
-
-$$
-e_{ss}=\frac{k}{K_p+k}r
-$$
-
-The experiment compares these theoretical values with
-the simulation results.
-
-```bash
-python -m experiments.exp02_proportional
-```
-
-![Proportional Control](graphs/02_proportional.png)
-
-### 3. Integral Control
-
-Compares P and PI controllers while keeping the
-proportional gain constant.
-
-Demonstrates how integral action eliminates steady-state
-error and how excessive integral gain can introduce
-overshoot and oscillations.
-
-```bash
-python -m experiments.exp03_integral
-```
-
-![Integral Control](graphs/03_integral.png)
-
-### 4. Derivative Control
-
-Investigates how derivative action affects position,
-velocity, overshoot, and damping.
-
-For a constant target:
-
-$$
-D=-K_d\dot{x}
-$$
-
-The derivative term acts as additional damping in the
-mass-spring-damper system.
-
-```bash
-python -m experiments.exp04_derivative
-```
-
-![Derivative Control](graphs/04_derivative.png)
-
-### 5. Controller Comparison
-
-Compares P, PI, PD, PID, and an alternative higher-gain
-PID configuration under identical plant conditions.
-
-The experiment reports all four performance metrics.
-
-```bash
-python -m experiments.exp05_comparison
-```
-
-![Controller Comparison](graphs/05_comparison.png)
-
-### 6. Integral Windup
-
-Introduces an actuator force limit of ±30 N.
-
-Compares PID control with and without conditional
-integration to demonstrate integral windup and its
-prevention.
-
-```bash
-python -m experiments.exp06_windup
-```
-
-![Integral Windup](graphs/06_windup.png)
-
-### 7. Sensor Noise
-
-Introduces uniformly distributed sensor noise of ±1 mm.
-
-Compares unfiltered and filtered derivative action using
-a first-order low-pass filter with a time constant of
-0.05 seconds.
-
-```bash
-python -m experiments.exp07_sensor_noise
-```
-
-![Sensor Noise](graphs/07_sensor_noise.png)
-
-### 8. Derivative Kick
-
-Changes the setpoint from 0 m to 1 m at t = 1 second.
-
-Compares derivative on error against derivative on
-measurement to demonstrate setpoint-induced derivative
-kick and its prevention.
-
-```bash
-python -m experiments.exp08_derivative_kick
-```
-
-![Derivative Kick](graphs/08_derivative_kick.png)
-
-### 9. Sampling Time
-
-Compares controller sampling intervals of 0.01, 0.05,
-0.1, 0.2, and 0.5 seconds.
-
-The plant integration interval remains fixed at
-0.001 seconds.
-
-Demonstrates the influence of sampling and zero-order
-hold on closed-loop stability.
-
-```bash
-python -m experiments.exp09_sampling_time
-```
-
-![Sampling Time](graphs/09_sampling_time.png)
-
-### 10. Ziegler-Nichols Tuning
-
-Applies the closed-loop Ziegler-Nichols tuning method
-to a second system:
-
-$$
-G(s)=\frac{1}{(s+1)^3}
-$$
-
-The system is implemented as three cascaded first-order
-differential equations:
-
-$$
-\dot{x}_1=u-x_1
-$$
-
-$$
-\dot{x}_2=x_1-x_2
-$$
-
-$$
-\dot{x}_3=x_2-x_3
-$$
-
-The output is:
-
-$$
-y=x_3
-$$
-
-The theoretical continuous-time ultimate gain and period
-are:
-
-$$
-K_u=8
-$$
-
-$$
-T_u=\frac{2\pi}{\sqrt{3}}
-$$
-
-The experiment determines the sampled-system ultimate
-gain, measures the oscillation period, and calculates
-the corresponding controller gains.
-
-| Controller | Kp | Ti | Td |
-|------------|----|----|----|
-| P | 0.5Ku | - | - |
-| PI | 0.45Ku | Tu/1.2 | - |
-| PID | 0.6Ku | Tu/2 | Tu/8 |
-
-Parallel-form gains are calculated using:
-
-$$
-K_i=\frac{K_p}{T_i}
-$$
-
-$$
-K_d=K_pT_d
-$$
-
-```bash
-python -m experiments.exp10_ziegler_nichols
-```
-
-![Ziegler-Nichols Tuning](graphs/10_ziegler_nichols.png)
-
-### 11. Improved PID Tuning
-
-Compares classical Ziegler-Nichols PID gains with
-manually adjusted gains.
-
-The experiment evaluates the trade-off between rise
-time, overshoot, settling time, steady-state error,
-and control effort.
-
-```bash
-python -m experiments.exp11_improved_tuning
-```
-
-![Improved PID Tuning](graphs/11_improved_tuning.png)
-
-## Selected Controller Gains
-
-### Mass-Spring-Damper System
-
-The nominal PID configuration used for the practical
-control experiments is:
-
-| Gain | Value |
-|------|-------|
-| Kp | 50 N/m |
-| Ki | 100 N/(m·s) |
-| Kd | 5 N·s/m |
-
-This configuration provides a balance between tracking
-accuracy, overshoot, and response time.
-
-For practical operation, the controller can be
-configured with:
-
-- Output limits of -30 N and +30 N.
-- Conditional integration.
-- Derivative on measurement.
-- Derivative filter time constant of 0.05 s.
-- Sampling interval of 0.01 s.
-
-The effects of these features are evaluated separately
-in the corresponding experiments.
-
-### Third-Order System
-
-The manually improved PID configuration investigated
-after Ziegler-Nichols tuning is:
-
-| Gain | Value |
-|------|-------|
-| Kp | 3.0 |
-| Ki | 0.7 |
-| Kd | 2.0 |
-
-These gains apply specifically to the normalized
-third-order system, not the mass-spring-damper plant.
-
-## Reusing the PID Controller
-
-The controller can be imported into other Python
-programs.
+Import the reusable controller and plant, then change the gains or physical parameters to explore their effects.
 
 ```python
 from pid_controller import PIDController
 from plant import MassSpringDamper, simulate
+from metrics import response_metrics
 
 controller = PIDController(
-    kp=50,
-    ki=100,
-    kd=5,
-    dt=0.01,
+    kp=100, ki=100, kd=15, dt=0.01,
     output_limits=(-30, 30),
     anti_windup=True,
     derivative_on_measurement=True,
     derivative_filter_tau=0.05,
 )
 
-plant = MassSpringDamper(
-    mass=1.0,
-    damping=10.0,
-    spring=20.0,
-)
+plant = MassSpringDamper(mass=1, damping=10, spring=20)
+run = simulate(controller, plant, duration=8, noise_amplitude=0.001)
 
-results = simulate(
-    controller,
-    plant,
-    duration=10.0,
-    setpoint=1.0,
-    plant_dt=0.001,
-)
-
-print("Final position:", results["position"][-1])
+print(response_metrics(run))
 ```
 
-The simulation returns NumPy arrays containing time,
-setpoint, position, velocity, sensor measurement,
-tracking error, applied force, and individual PID terms.
+This configuration includes actuator limits, anti-windup, derivative filtering and noisy measurements. The simulator returns time, position, velocity, applied force and the individual PID contributions. All results are numerical simulations, not hardware measurements.
 
-## Reproducibility
+## Tests
 
-All experiments use fixed plant parameters, controller
-configurations, and simulation intervals defined within
-their respective Python files.
-
-The sensor noise experiment uses a fixed random seed.
-
-Every figure is saved as a PNG image at 300 DPI.
-
-To reproduce all figures, install the dependencies
-and execute:
+Run the 13 numerical tests using the same Python environment:
 
 ```bash
-python run_experiments.py
+python -m unittest discover -s tests -v
 ```
 
-Numerical results are printed directly by the
-experiments, allowing the reported performance metrics
-to be compared against the generated graphs.
-
-## Limitations
-
-- The primary plant assumes linear spring stiffness
-  and viscous damping.
-- Actuator saturation is enabled only in experiments
-  where force limits are being investigated.
-- Sensor noise is modeled as bounded, uniformly
-  distributed random noise.
-- Steady-state error is estimated using a finite
-  simulation duration.
-- Continuous-time stability calculations may differ
-  from the actual sampled-controller stability limits.
-- The selected gains are specific to the simulated
-  plant parameters and operating conditions.
-- The results represent numerical simulations rather
-  than physical hardware measurements.
-
-## Conclusion
-
-Proportional control improves the response to present
-error but cannot eliminate steady-state error in the
-given mass-spring-damper system.
-
-Integral control removes persistent error, while
-derivative control can improve damping and reduce
-oscillations.
-
-Practical PID implementations must also consider
-actuator limits, integral windup, sensor noise,
-derivative kick, and controller sampling intervals.
-
-Ziegler-Nichols tuning provides an initial controller
-configuration that can be refined according to
-application-specific performance requirements.
-
-## AI Assistance
-
-AI tools were used to assist with implementation planning,
-Python code development, mathematical explanations, and
-documentation.
-
-The controller logic and simulation methods are presented
-explicitly to support independent understanding, execution,
-modification, and verification.
+The tests cover PID arithmetic, theoretical equilibrium positions, saturation, derivative kick, noise filtering, tuning and combined practical-controller performance. The fixed random seed makes the noise experiments reproducible.
 
 ## References
 
-- Åström, K. J., and Murray, R. M.
-  *Feedback Systems: An Introduction for Scientists
-  and Engineers.*
-  https://fbsbook.org/
-
-- Ogata, K.
-  *Modern Control Engineering.*
-
-- NumPy Documentation:
-  https://numpy.org/doc/
-
-- Matplotlib Documentation:
-  https://matplotlib.org/stable/
+- [Feedback Systems — Åström and Murray](https://fbsbook.org/)
+- [NumPy documentation](https://numpy.org/doc/)
+- [Matplotlib documentation](https://matplotlib.org/stable/)
